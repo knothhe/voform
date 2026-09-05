@@ -19,7 +19,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         buildMenuBar()
-        requestSystemPermissions()
 
         shortcutMonitor.onAction = { [weak self] action in self?.handleShortcut(action) }
         shortcutMonitor.onInterrupted = { [weak self] in self?.cancelRecordingImmediately() }
@@ -31,10 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(cancelRecordingImmediately), name: NSWorkspace.sessionDidResignActiveNotification, object: nil
         )
-        if !shortcutMonitor.start() {
-            showPermissionAlert(message: "Voform could not monitor the dictation shortcut. Enable Input Monitoring and Accessibility for Voform in System Settings, then relaunch it.")
-        }
-        Task { await transcriber.requestPermissions() }
+        applyRecognitionEngine(promptForPermissions: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -86,13 +82,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsController.onSave = { [weak self] in
             guard let self else { return }
             shortcutMonitor.configure(shortcut: preferences.holdShortcut, mode: preferences.recordingMode)
+            applyRecognitionEngine(promptForPermissions: true)
             updateMenuStates()
         }
         settingsController.onShortcutRecordingChanged = { [weak self] isRecordingShortcut in
             guard let self else { return }
             if isRecordingShortcut {
                 shortcutMonitor.stop()
-            } else if !shortcutMonitor.start() {
+            } else if preferences.recognitionEngine == .apple && !shortcutMonitor.start() {
                 showPermissionAlert(message: "Voform could not resume shortcut monitoring. Check Input Monitoring and Accessibility permissions, then relaunch it.")
             }
         }
@@ -168,6 +165,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var shortcutHint: String {
+        if preferences.recognitionEngine == .codex {
+            return "Use the global dictation shortcut configured in ChatGPT"
+        }
         let key = preferences.holdShortcut.displayTitle
         if preferences.recordingMode == .hold { return "Hold \(key) to dictate; release to finish" }
         let verb = preferences.holdShortcut.isModifierOnly ? "Tap" : "Press"
@@ -179,7 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func beginRecording() {
-        guard !isRecording, !isProcessing else { return }
+        guard preferences.recognitionEngine == .apple, !isRecording, !isProcessing else { return }
         do {
             try transcriber.start(
                 language: preferences.language,
@@ -202,6 +202,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             recordingPanel.show()
         } catch {
             showPermissionAlert(message: error.localizedDescription)
+        }
+    }
+
+    private func applyRecognitionEngine(promptForPermissions: Bool) {
+        if preferences.recognitionEngine == .codex {
+            shortcutMonitor.stop()
+            transcriber.cancel()
+            return
+        }
+
+        if promptForPermissions {
+            requestSystemPermissions()
+            Task { await transcriber.requestPermissions() }
+        }
+        if !shortcutMonitor.start() {
+            showPermissionAlert(message: "Voform could not monitor the dictation shortcut. Enable Input Monitoring and Accessibility for Voform in System Settings, then relaunch it.")
         }
     }
 

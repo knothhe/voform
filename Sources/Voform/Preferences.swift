@@ -99,6 +99,18 @@ enum RecordingMode: String, CaseIterable {
     }
 }
 
+enum RecognitionEngine: String, CaseIterable {
+    case apple
+    case codex
+
+    var title: String {
+        switch self {
+        case .apple: return "Apple Speech"
+        case .codex: return "Codex Global Dictation"
+        }
+    }
+}
+
 enum RecognitionLanguage: String, CaseIterable {
     case english = "en-US"
     case simplifiedChinese = "zh-CN"
@@ -121,6 +133,7 @@ final class Preferences {
     static let shared = Preferences()
 
     private enum Key {
+        static let recognitionEngine = "recognitionEngine"
         static let language = "recognitionLanguage"
         static let recordingMode = "recordingMode"
         static let shortcutKeyCode = "holdShortcutKeyCode"
@@ -134,6 +147,7 @@ final class Preferences {
 
     private init() {
         defaults.register(defaults: [
+            Key.recognitionEngine: RecognitionEngine.apple.rawValue,
             Key.language: RecognitionLanguage.simplifiedChinese.rawValue,
             Key.recordingMode: RecordingMode.toggle.rawValue,
             Key.shortcutKeyCode: Int(HoldShortcut.defaultShortcut.keyCode),
@@ -152,6 +166,11 @@ final class Preferences {
     var recordingMode: RecordingMode {
         get { RecordingMode(rawValue: defaults.string(forKey: Key.recordingMode) ?? "") ?? .toggle }
         set { defaults.set(newValue.rawValue, forKey: Key.recordingMode) }
+    }
+
+    var recognitionEngine: RecognitionEngine {
+        get { RecognitionEngine(rawValue: defaults.string(forKey: Key.recognitionEngine) ?? "") ?? .apple }
+        set { defaults.set(newValue.rawValue, forKey: Key.recognitionEngine) }
     }
 
     var language: RecognitionLanguage {

@@ -33,6 +33,6 @@
     <key>NSMicrophoneUsageDescription</key>
     <string>Voform needs microphone access to transcribe your voice.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Voform uses Apple Speech Recognition to turn your voice into text.</string>
+    <string>Voform can use Apple Speech Recognition to turn your voice into text.</string>
 </dict>
 </plist>

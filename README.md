@@ -4,6 +4,8 @@ Voform is a macOS 14+ menu-bar voice input app. By default, press **Option-Space
 
 Open **Settings… → General** to configure these independently:
 
+- **Recognition engine:** **Apple Speech** is the default and records inside Voform using the macOS Speech framework. **Codex Global Dictation** delegates voice input to the installed ChatGPT desktop app and its existing ChatGPT sign-in. It does not use Codex App Server, an OpenAI API key, or ChatGPT credentials inside Voform.
+- **Recognition language:** guides Apple Speech. Simplified Chinese is the default.
 - **Dictation shortcut:** click **Record…** and press a modifier-key combination, or click **Use Fn**. Choose a combination that is not already used by another app.
 - **Recording mode:** **Press to toggle** starts and finishes with separate presses; **Hold to talk** records while held and finishes on release.
 
@@ -41,10 +43,12 @@ If no usable identity exists, create one in **Keychain Access → Certificate As
 security find-identity -v -p codesigning
 ```
 
-On first launch, grant Microphone, Speech Recognition, Accessibility, and Input Monitoring permissions. Because these permissions are associated with the app's code signature and path, run the installed app from a stable location such as `/Applications` for regular use.
+For Apple Speech mode, grant Voform Microphone, Speech Recognition, Accessibility, and Input Monitoring permissions. Because these permissions are associated with the app's code signature and path, run the installed app from a stable location such as `/Applications` for regular use.
 
 Simplified Chinese (`zh-CN`) is the default recognition language. Other recognition languages are available from the menu-bar menu.
 
+For Codex Global Dictation, install and sign in to the ChatGPT desktop app. Configure its hold-to-dictate or toggle-dictation global shortcut in ChatGPT Settings, focus a text field in any app, and use that shortcut. ChatGPT performs the recording and transcription, then inserts the text at the cursor. Voform pauses its own shortcut and does not request microphone access in this mode. Availability can depend on the ChatGPT account, workspace, and feature rollout.
+
 ## Validation
 
-Run `swift test --disable-sandbox` for gesture regression tests. On a Mac with microphone, speech, and keyboard permissions granted, verify both recording modes, Fn+function-key combinations, Escape cancellation, and the floating Finish/Cancel controls in your usual text editor.
+Run `swift test --disable-sandbox` for gesture regression tests. For Apple Speech, verify both recording modes, Fn+function-key combinations, Escape cancellation, and the floating Finish/Cancel controls. For Codex Global Dictation, verify that Voform pauses its shortcut, opens ChatGPT from Settings, and accepts text inserted through ChatGPT's configured global dictation shortcut.

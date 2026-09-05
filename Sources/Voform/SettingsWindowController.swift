@@ -70,6 +70,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private var paneViews: [Pane: NSView] = [:]
     private var selectedPane = Pane.general
 
+    private let recognitionEngineButton = NSPopUpButton()
     private let languageButton = NSPopUpButton()
     private let recordingModeButton = NSPopUpButton()
     private let useFnButton = NSButton(title: "Use Fn", target: nil, action: nil)
@@ -77,6 +78,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private let changeShortcutButton = NSButton(title: "Record…", target: nil, action: nil)
     private let resetShortcutButton = NSButton(title: "Use Default", target: nil, action: nil)
     private let shortcutStatusLabel = NSTextField(labelWithString: "")
+    private let codexStatusLabel = NSTextField(wrappingLabelWithString: "")
+    private let openChatGPTButton = NSButton(title: "Open ChatGPT…", target: nil, action: nil)
+    private var codexGuideRow: NSView?
 
     private var permissionStatusLabels: [PermissionKind: NSTextField] = [:]
     private var pendingShortcut = HoldShortcut.defaultShortcut
@@ -87,7 +91,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 540),
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 620),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -154,6 +158,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     private func buildGeneralPane() -> NSView {
+        recognitionEngineButton.removeAllItems()
+        for engine in RecognitionEngine.allCases {
+            recognitionEngineButton.addItem(withTitle: engine.title)
+            recognitionEngineButton.lastItem?.representedObject = engine.rawValue
+        }
+        recognitionEngineButton.target = self
+        recognitionEngineButton.action = #selector(recognitionEngineChanged)
+        recognitionEngineButton.controlSize = .large
+        recognitionEngineButton.toolTip = "Codex Global Dictation runs in the ChatGPT desktop app and inserts text at the current cursor."
+
         languageButton.removeAllItems()
         for language in RecognitionLanguage.allCases {
             languageButton.addItem(withTitle: language.title)
@@ -224,6 +238,31 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             )
         ])
 
+        codexStatusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        codexStatusLabel.textColor = .secondaryLabelColor
+        codexStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        openChatGPTButton.target = self
+        openChatGPTButton.action = #selector(openChatGPT)
+        openChatGPTButton.bezelStyle = .rounded
+        openChatGPTButton.controlSize = .small
+        let codexControls = NSStackView(views: [codexStatusLabel, flexibleSpace(), openChatGPTButton])
+        codexControls.orientation = .horizontal
+        codexControls.alignment = .centerY
+        codexControls.spacing = 10
+        let codexGuideRow = paddedView(codexControls, top: 10, bottom: 10)
+        self.codexGuideRow = codexGuideRow
+
+        let engineCard = makeCard([
+            settingRow(
+                title: "Recognition engine",
+                detail: "Apple records in Voform. Codex delegates input to the ChatGPT desktop app.",
+                control: recognitionEngineButton,
+                height: 68
+            ),
+            separator(),
+            codexGuideRow
+        ])
+
         for mode in RecordingMode.allCases {
             recordingModeButton.addItem(withTitle: mode.title)
             recordingModeButton.lastItem?.representedObject = mode.rawValue
@@ -242,7 +281,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         return makePane(
             title: "General",
             subtitle: "Choose how Voform listens and starts dictation.",
-            cards: [languageCard, shortcutCard, modeCard]
+            cards: [engineCard, languageCard, shortcutCard, modeCard]
         )
     }
 
@@ -271,12 +310,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         let note = NSTextField(wrappingLabelWithString: "After changing a permission in System Settings, return to Voform. Some changes may require relaunching the app.")
         note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         note.textColor = .secondaryLabelColor
+        let codexNote = NSTextField(wrappingLabelWithString: "Codex Global Dictation instead uses the microphone and Accessibility permissions granted to ChatGPT.")
+        codexNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        codexNote.textColor = .secondaryLabelColor
+        let footer = NSStackView(views: [note, codexNote])
+        footer.orientation = .vertical
+        footer.alignment = .leading
+        footer.spacing = 5
 
         return makePane(
             title: "Privacy & Permissions",
-            subtitle: "Voform only needs access required for voice input.",
+            subtitle: "These Voform permissions are used only by Apple Speech mode.",
             cards: [permissionsCard],
-            footer: note
+            footer: footer
         )
     }
 
@@ -417,23 +463,67 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     private func updateGeneralControls() {
+        let engine = Preferences.shared.recognitionEngine
+        let usesAppleSpeech = engine == .apple
+        recognitionEngineButton.selectItem(at: RecognitionEngine.allCases.firstIndex(of: engine) ?? 0)
         if let index = RecognitionLanguage.allCases.firstIndex(of: Preferences.shared.language) {
             languageButton.selectItem(at: index)
         }
+        languageButton.isEnabled = usesAppleSpeech
         currentShortcutLabel.stringValue = pendingShortcut.displayTitle
         currentShortcutLabel.textColor = .labelColor
+        currentShortcutLabel.isEnabled = usesAppleSpeech
         changeShortcutButton.title = "Record…"
         changeShortcutButton.action = #selector(beginShortcutRecording)
-        resetShortcutButton.isEnabled = true
-        resetShortcutButton.isHidden = pendingShortcut == .defaultShortcut
+        changeShortcutButton.isEnabled = usesAppleSpeech
+        useFnButton.isEnabled = usesAppleSpeech
+        resetShortcutButton.isEnabled = usesAppleSpeech
+        resetShortcutButton.isHidden = !usesAppleSpeech || pendingShortcut == .defaultShortcut
         recordingModeButton.selectItem(at: RecordingMode.allCases.firstIndex(of: Preferences.shared.recordingMode) ?? 0)
-        shortcutStatusLabel.stringValue = pendingShortcut.isModifierOnly
-            ? "Set the macOS Globe-key action to Do Nothing. Hold Enter to finish."
-            : "⌥ Space recommended. Hold Enter to finish; Esc cancels."
-        shortcutStatusLabel.toolTip = pendingShortcut.isModifierOnly
+        recordingModeButton.isEnabled = usesAppleSpeech
+        shortcutStatusLabel.stringValue = usesAppleSpeech
+            ? (pendingShortcut.isModifierOnly
+                ? "Set the macOS Globe-key action to Do Nothing. Hold Enter to finish."
+                : "⌥ Space recommended. Hold Enter to finish; Esc cancels.")
+            : "Voform's shortcut is paused while Codex Global Dictation is selected."
+        shortcutStatusLabel.toolTip = usesAppleSpeech && pendingShortcut.isModifierOnly
             ? "In System Settings → Keyboard, set Press Globe key to to Do Nothing. In toggle mode, tap Fn alone within 0.5 seconds; Fn combinations are ignored. In hold mode, another key cancels the recording."
             : nil
         shortcutStatusLabel.textColor = .secondaryLabelColor
+
+        let chatGPTURL = findChatGPTApplication()
+        openChatGPTButton.isEnabled = chatGPTURL != nil
+        codexStatusLabel.stringValue = chatGPTURL == nil
+            ? "ChatGPT was not found in Applications. Install it before using this mode."
+            : "In ChatGPT Settings, configure a global dictation hotkey; then use it with the cursor in any app."
+        codexGuideRow?.isHidden = usesAppleSpeech
+    }
+
+    @objc private func recognitionEngineChanged() {
+        guard let rawValue = recognitionEngineButton.selectedItem?.representedObject as? String,
+              let engine = RecognitionEngine(rawValue: rawValue) else { return }
+        endShortcutRecording()
+        Preferences.shared.recognitionEngine = engine
+        updateGeneralControls()
+        onSave?()
+    }
+
+    @objc private func openChatGPT() {
+        guard let url = findChatGPTApplication() else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func findChatGPTApplication() -> URL? {
+        let workspace = NSWorkspace.shared
+        for bundleIdentifier in ["com.openai.codex", "com.openai.chat"] {
+            if let url = workspace.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+                return url
+            }
+        }
+        for path in ["/Applications/ChatGPT.app", "/Applications/Codex.app"] {
+            if FileManager.default.fileExists(atPath: path) { return URL(fileURLWithPath: path) }
+        }
+        return nil
     }
 
     @objc private func languageChanged() {
