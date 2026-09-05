@@ -7,13 +7,11 @@ import Speech
 final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
     enum Pane: String, CaseIterable {
         case general
-        case refinement
         case privacy
 
         var title: String {
             switch self {
             case .general: return "General"
-            case .refinement: return "AI Refinement"
             case .privacy: return "Privacy"
             }
         }
@@ -21,7 +19,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         var symbolName: String {
             switch self {
             case .general: return "slider.horizontal.3"
-            case .refinement: return "wand.and.stars"
             case .privacy: return "hand.raised"
             }
         }
@@ -81,24 +78,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private let resetShortcutButton = NSButton(title: "Use Default", target: nil, action: nil)
     private let shortcutStatusLabel = NSTextField(labelWithString: "")
 
-    private let refinementToggle = NSButton(checkboxWithTitle: "Enable AI refinement", target: nil, action: nil)
-    private let baseURLField = NSTextField()
-    private let apiKeyField = NSSecureTextField()
-    private let modelField = NSTextField()
-    private let refinementStatusLabel = NSTextField(labelWithString: "")
-    private let testButton = NSButton(title: "Test Connection", target: nil, action: nil)
-    private let saveButton = NSButton(title: "Save Configuration", target: nil, action: nil)
-
     private var permissionStatusLabels: [PermissionKind: NSTextField] = [:]
-    private let refiner: LLMRefiner
     private var pendingShortcut = HoldShortcut.defaultShortcut
     private var shortcutEventMonitor: Any?
 
     var onSave: (() -> Void)?
     var onShortcutRecordingChanged: ((Bool) -> Void)?
 
-    init(refiner: LLMRefiner) {
-        self.refiner = refiner
+    init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: 540),
             styleMask: [.titled, .closable],
@@ -131,7 +118,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     func show(pane: Pane = .general) {
         pendingShortcut = Preferences.shared.holdShortcut
         updateGeneralControls()
-        updateRefinementControls()
         refreshPermissionStatuses()
         selectPane(pane)
 
@@ -163,7 +149,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         ])
 
         paneViews[.general] = buildGeneralPane()
-        paneViews[.refinement] = buildRefinementPane()
         paneViews[.privacy] = buildPrivacyPane()
         selectPane(.general)
     }
@@ -248,7 +233,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         let modeCard = makeCard([
             settingRow(
                 title: "Recording mode",
-                detail: "Toggle: press again to finish. Hold: release to finish.",
+                detail: "Toggle: press again to finish. Hold: release to finish. You can also hold Enter.",
                 control: recordingModeButton,
                 height: 68
             )
@@ -258,71 +243,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             title: "General",
             subtitle: "Choose how Voform listens and starts dictation.",
             cards: [languageCard, shortcutCard, modeCard]
-        )
-    }
-
-    private func buildRefinementPane() -> NSView {
-        refinementToggle.target = self
-        refinementToggle.action = #selector(refinementToggled)
-        refinementToggle.controlSize = .large
-
-        let toggleCard = makeCard([
-            settingRow(
-                title: "Improve transcripts with AI",
-                detail: "Polishes wording and punctuation before text is inserted.",
-                control: refinementToggle,
-                height: 68,
-                hidesTitle: true
-            )
-        ])
-
-        baseURLField.placeholderString = "https://api.openai.com/v1"
-        apiKeyField.placeholderString = "API key"
-        modelField.placeholderString = "gpt-4.1-mini"
-        for field in [baseURLField, apiKeyField, modelField] {
-            field.controlSize = .large
-        }
-
-        let grid = NSGridView(views: [
-            [formLabel("API Base URL"), baseURLField],
-            [formLabel("API Key"), apiKeyField],
-            [formLabel("Model"), modelField]
-        ])
-        grid.rowSpacing = 12
-        grid.columnSpacing = 14
-        grid.column(at: 0).xPlacement = .trailing
-        grid.column(at: 1).width = 390
-        grid.translatesAutoresizingMaskIntoConstraints = false
-
-        refinementStatusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        refinementStatusLabel.textColor = .secondaryLabelColor
-        refinementStatusLabel.lineBreakMode = .byTruncatingTail
-        refinementStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        testButton.target = self
-        testButton.action = #selector(testConnection)
-        testButton.bezelStyle = .rounded
-        saveButton.target = self
-        saveButton.action = #selector(saveLLMSettings)
-        saveButton.bezelStyle = .rounded
-        saveButton.keyEquivalent = "\r"
-
-        let actions = NSStackView(views: [refinementStatusLabel, flexibleSpace(), testButton, saveButton])
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = 8
-
-        let formStack = NSStackView(views: [grid, separator(), actions])
-        formStack.orientation = .vertical
-        formStack.alignment = .width
-        formStack.spacing = 14
-        formStack.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 14, right: 18)
-
-        let configurationCard = makeCard([formStack], inset: false)
-        return makePane(
-            title: "AI Refinement",
-            subtitle: "Use any OpenAI-compatible endpoint to clean up transcripts.",
-            cards: [toggleCard, configurationCard]
         )
     }
 
@@ -430,8 +350,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         title: String,
         detail: String,
         control: NSView,
-        height: CGFloat,
-        hidesTitle: Bool = false
+        height: CGFloat
     ) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
@@ -439,7 +358,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         detailLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         detailLabel.textColor = .secondaryLabelColor
 
-        let labels = NSStackView(views: hidesTitle ? [detailLabel] : [titleLabel, detailLabel])
+        let labels = NSStackView(views: [titleLabel, detailLabel])
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = 3
@@ -480,13 +399,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         return view
     }
 
-    private func formLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.alignment = .right
-        label.font = .systemFont(ofSize: 13, weight: .medium)
-        return label
-    }
-
     private func selectPane(_ pane: Pane) {
         if pane != .general { endShortcutRecording() }
         selectedPane = pane
@@ -516,29 +428,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         resetShortcutButton.isHidden = pendingShortcut == .defaultShortcut
         recordingModeButton.selectItem(at: RecordingMode.allCases.firstIndex(of: Preferences.shared.recordingMode) ?? 0)
         shortcutStatusLabel.stringValue = pendingShortcut.isModifierOnly
-            ? "Set the macOS Globe-key action to Do Nothing."
-            : "⌥ Space recommended. Esc cancels a recording."
+            ? "Set the macOS Globe-key action to Do Nothing. Hold Enter to finish."
+            : "⌥ Space recommended. Hold Enter to finish; Esc cancels."
         shortcutStatusLabel.toolTip = pendingShortcut.isModifierOnly
             ? "In System Settings → Keyboard, set Press Globe key to to Do Nothing. In toggle mode, tap Fn alone within 0.5 seconds; Fn combinations are ignored. In hold mode, another key cancels the recording."
             : nil
         shortcutStatusLabel.textColor = .secondaryLabelColor
-    }
-
-    private func updateRefinementControls() {
-        let configuration = Preferences.shared.llmConfiguration
-        refinementToggle.state = Preferences.shared.llmEnabled ? .on : .off
-        baseURLField.stringValue = configuration.baseURL
-        apiKeyField.stringValue = configuration.apiKey
-        modelField.stringValue = configuration.model
-        refinementStatusLabel.stringValue = ""
-        updateRefinementFieldState()
-    }
-
-    private func updateRefinementFieldState() {
-        let enabled = refinementToggle.state == .on
-        for control in [baseURLField, apiKeyField, modelField, testButton, saveButton] {
-            control.isEnabled = enabled
-        }
     }
 
     @objc private func languageChanged() {
@@ -561,21 +456,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         endShortcutRecording()
         pendingShortcut = .function
         commitShortcut()
-    }
-
-    @objc private func refinementToggled() {
-        Preferences.shared.llmEnabled = refinementToggle.state == .on
-        updateRefinementFieldState()
-        refinementStatusLabel.textColor = .secondaryLabelColor
-        refinementStatusLabel.stringValue = Preferences.shared.llmEnabled ? "Refinement enabled." : "Refinement disabled."
-        onSave?()
-    }
-
-    @objc private func saveLLMSettings() {
-        Preferences.shared.llmConfiguration = currentConfiguration
-        refinementStatusLabel.textColor = .systemGreen
-        refinementStatusLabel.stringValue = "Configuration saved."
-        onSave?()
     }
 
     @objc private func beginShortcutRecording() {
@@ -639,40 +519,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         resetShortcutButton.isEnabled = true
         currentShortcutLabel.stringValue = pendingShortcut.displayTitle
         currentShortcutLabel.textColor = .labelColor
-    }
-
-    private var currentConfiguration: LLMConfiguration {
-        LLMConfiguration(
-            baseURL: baseURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
-            apiKey: apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
-            model: modelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
-    }
-
-    @objc private func testConnection() {
-        let configuration = currentConfiguration
-        guard configuration.isConfigured else {
-            refinementStatusLabel.textColor = .systemRed
-            refinementStatusLabel.stringValue = "Complete all three fields first."
-            return
-        }
-        testButton.isEnabled = false
-        saveButton.isEnabled = false
-        refinementStatusLabel.textColor = .secondaryLabelColor
-        refinementStatusLabel.stringValue = "Testing…"
-        Task {
-            do {
-                _ = try await refiner.refine("测试 Python 和 JSON。", configuration: configuration)
-                Preferences.shared.llmConfiguration = configuration
-                refinementStatusLabel.textColor = .systemGreen
-                refinementStatusLabel.stringValue = "Connection successful and saved."
-                onSave?()
-            } catch {
-                refinementStatusLabel.textColor = .systemRed
-                refinementStatusLabel.stringValue = error.localizedDescription
-            }
-            updateRefinementFieldState()
-        }
     }
 
     @objc private func openPermissionSettings(_ sender: NSButton) {

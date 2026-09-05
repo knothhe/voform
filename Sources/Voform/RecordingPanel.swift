@@ -131,8 +131,8 @@ final class RecordingPanelController: NSObject {
         }
         finishButton.action = #selector(finishClicked)
         cancelButton.action = #selector(cancelClicked)
-        finishButton.toolTip = "Finish recording and insert text"
-        cancelButton.toolTip = "Cancel recording (Esc)"
+        finishButton.toolTip = "Finish recording and insert text (hold Enter)"
+        cancelButton.toolTip = "Cancel recording with confirmation (Esc)"
         finishButton.frame = NSRect(x: 104, y: 16, width: 62, height: 24)
         cancelButton.frame = NSRect(x: 170, y: 16, width: 66, height: 24)
         visualEffectView.autoresizingMask = [.width, .height]

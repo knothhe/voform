@@ -8,6 +8,7 @@ final class ShortcutMonitor {
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var enterHoldTask: DispatchWorkItem?
     private var generation = 0
     private var gesture: ShortcutGesture
     var shortcut: HoldShortcut { gesture.shortcut }
@@ -20,6 +21,8 @@ final class ShortcutMonitor {
     func configure(shortcut: HoldShortcut, mode: RecordingMode) {
         guard shortcut != self.shortcut || mode != self.mode else { return }
         generation += 1
+        enterHoldTask?.cancel()
+        enterHoldTask = nil
         onInterrupted?()
         gesture = ShortcutGesture(shortcut: shortcut, mode: mode)
     }
@@ -54,6 +57,9 @@ final class ShortcutMonitor {
                 time: ProcessInfo.processInfo.systemUptime,
                 canCancel: monitor.canCancel
             )
+            if let enterHoldEvent = result.enterHoldEvent {
+                monitor.handleEnterHold(enterHoldEvent)
+            }
             // Keep microphone startup and UI work out of the event-tap callback.
             if let action = result.action {
                 let generation = monitor.generation
@@ -78,6 +84,8 @@ final class ShortcutMonitor {
 
     func stop() {
         generation += 1
+        enterHoldTask?.cancel()
+        enterHoldTask = nil
         if let runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes) }
         if let eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
@@ -90,4 +98,19 @@ final class ShortcutMonitor {
     }
 
     deinit { stop() }
+
+    private func handleEnterHold(_ event: ShortcutGesture.EnterHoldEvent) {
+        enterHoldTask?.cancel()
+        enterHoldTask = nil
+        guard event == .began else { return }
+
+        let generation = generation
+        let task = DispatchWorkItem { [weak self] in
+            guard let self, generation == self.generation, self.canCancel else { return }
+            self.enterHoldTask = nil
+            self.onAction?(.finish)
+        }
+        enterHoldTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: task)
+    }
 }

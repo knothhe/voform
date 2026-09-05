@@ -4,9 +4,11 @@ import Foundation
 struct ShortcutGesture {
     enum Action: Equatable { case begin, finish, toggle, cancel }
     enum Event { case down, up, flagsChanged }
+    enum EnterHoldEvent: Equatable { case began, ended }
     struct Result {
         var action: Action? = nil
         var consume = false
+        var enterHoldEvent: EnterHoldEvent? = nil
     }
 
     var shortcut: HoldShortcut
@@ -18,6 +20,7 @@ struct ShortcutGesture {
     private var fnPressedAt: TimeInterval = 0
     private var otherKeys: Set<UInt16> = []
     private var escapeHeld = false
+    private var enterHeld = false
 
     init(shortcut: HoldShortcut, mode: RecordingMode) {
         self.shortcut = shortcut
@@ -38,6 +41,22 @@ struct ShortcutGesture {
             if event == .up && escapeHeld {
                 escapeHeld = false
                 return Result(consume: true)
+            }
+        }
+
+        // A bare Return or keypad Enter is reserved while recording. The monitor
+        // turns this press/release pair into a deliberate, timed hold gesture.
+        if (keyCode == 36 || keyCode == 76) && modifiers.isEmpty && (canCancel || enterHeld) {
+            if event == .down {
+                if !enterHeld {
+                    enterHeld = true
+                    return Result(consume: true, enterHoldEvent: .began)
+                }
+                return Result(consume: true)
+            }
+            if event == .up && enterHeld {
+                enterHeld = false
+                return Result(consume: true, enterHoldEvent: .ended)
             }
         }
 

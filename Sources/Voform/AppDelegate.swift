@@ -8,14 +8,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let transcriber = SpeechTranscriber()
     private let recordingPanel = RecordingPanelController()
     private let textInjector = TextInjector()
-    private let llmRefiner = LLMRefiner()
-    private lazy var settingsController = SettingsWindowController(refiner: llmRefiner)
+    private lazy var settingsController = SettingsWindowController()
     private var statusItem: NSStatusItem!
     private var languageItems: [RecognitionLanguage: NSMenuItem] = [:]
-    private var refinementToggleItem: NSMenuItem!
     private var shortcutHintItem: NSMenuItem!
     private var isRecording = false
     private var isProcessing = false
+    private var isShowingCancelConfirmation = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -23,14 +22,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         requestSystemPermissions()
 
         shortcutMonitor.onAction = { [weak self] action in self?.handleShortcut(action) }
-        shortcutMonitor.onInterrupted = { [weak self] in self?.cancelRecording() }
+        shortcutMonitor.onInterrupted = { [weak self] in self?.cancelRecordingImmediately() }
         recordingPanel.onFinish = { [weak self] in self?.finishRecording() }
-        recordingPanel.onCancel = { [weak self] in self?.cancelRecording() }
+        recordingPanel.onCancel = { [weak self] in self?.requestCancelRecording() }
         NSWorkspace.shared.notificationCenter.addObserver(
-            self, selector: #selector(cancelRecording), name: NSWorkspace.willSleepNotification, object: nil
+            self, selector: #selector(cancelRecordingImmediately), name: NSWorkspace.willSleepNotification, object: nil
         )
         NSWorkspace.shared.notificationCenter.addObserver(
-            self, selector: #selector(cancelRecording), name: NSWorkspace.sessionDidResignActiveNotification, object: nil
+            self, selector: #selector(cancelRecordingImmediately), name: NSWorkspace.sessionDidResignActiveNotification, object: nil
         )
         if !shortcutMonitor.start() {
             showPermissionAlert(message: "Voform could not monitor the dictation shortcut. Enable Input Monitoring and Accessibility for Voform in System Settings, then relaunch it.")
@@ -71,14 +70,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         languageItem.submenu = languageMenu
         menu.addItem(languageItem)
 
-        let refinementMenu = NSMenu()
-        refinementToggleItem = NSMenuItem(title: "Enabled", action: #selector(toggleRefinement(_:)), keyEquivalent: "")
-        refinementToggleItem.target = self
-        refinementMenu.addItem(refinementToggleItem)
-        let refinementItem = NSMenuItem(title: "LLM Refinement", action: nil, keyEquivalent: "")
-        refinementItem.submenu = refinementMenu
-        menu.addItem(refinementItem)
-
         menu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
@@ -111,7 +102,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for (language, item) in languageItems {
             item.state = language == preferences.language ? .on : .off
         }
-        refinementToggleItem?.state = preferences.llmEnabled ? .on : .off
         shortcutHintItem?.title = shortcutHint
         statusItem?.button?.toolTip = shortcutToolTip
     }
@@ -120,11 +110,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let rawValue = sender.representedObject as? String,
               let language = RecognitionLanguage(rawValue: rawValue) else { return }
         preferences.language = language
-        updateMenuStates()
-    }
-
-    @objc private func toggleRefinement(_ sender: NSMenuItem) {
-        preferences.llmEnabled.toggle()
         updateMenuStates()
     }
 
@@ -140,11 +125,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .finish: finishRecording()
         case .toggle:
             if isRecording { finishRecording() } else { beginRecording() }
-        case .cancel: cancelRecording()
+        case .cancel: requestCancelRecording()
         }
     }
 
-    @objc private func cancelRecording() {
+    private func requestCancelRecording() {
+        guard isRecording, !isShowingCancelConfirmation else { return }
+        isShowingCancelConfirmation = true
+        shortcutMonitor.canCancel = false
+        defer {
+            isShowingCancelConfirmation = false
+            shortcutMonitor.canCancel = isRecording
+        }
+
+        let previousApplication = NSWorkspace.shared.frontmostApplication
+        let settingsWindow = settingsController.window
+        let shouldRestoreSettingsWindow = settingsWindow?.isVisible == true
+        settingsWindow?.orderOut(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Cancel this recording?"
+        alert.informativeText = "The current transcript will be discarded."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Keep Recording")
+        alert.addButton(withTitle: "Discard Recording")
+        alert.window.level = .floating
+        if alert.runModal() == .alertSecondButtonReturn {
+            cancelRecordingImmediately()
+        }
+        if shouldRestoreSettingsWindow {
+            settingsWindow?.orderFront(nil)
+        }
+        previousApplication?.activate(options: [])
+    }
+
+    @objc private func cancelRecordingImmediately() {
         guard isRecording else { return }
         isRecording = false
         shortcutMonitor.canCancel = false
@@ -209,17 +224,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 recordingPanel.hide()
                 isProcessing = false
                 return
-            }
-
-            let configuration = preferences.llmConfiguration
-            if preferences.llmEnabled && configuration.isConfigured {
-                recordingPanel.updateText("Refining…")
-                do {
-                    transcript = try await llmRefiner.refine(transcript, configuration: configuration)
-                } catch {
-                    // Refinement is optional: preserve and inject the original transcript on API failure.
-                    NSLog("Voform refinement failed: %@", error.localizedDescription)
-                }
             }
 
             do {

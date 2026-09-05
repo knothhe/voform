@@ -7,6 +7,8 @@ CONTENTS_DIR := $(APP_DIR)/Contents
 MODULE_CACHE := $(CURDIR)/.build/ModuleCache
 SIGNING_CONFIG := .voform-signing-identity
 SIGNING_RESOLVER := Scripts/resolve-signing-identity.sh
+ASSET_CATALOG := Resources/Assets.xcassets
+ASSET_INFO := $(BUILD_DIR)/assetcatalog-info.plist
 
 .PHONY: all build run install clean signing-identity
 
@@ -18,6 +20,7 @@ build:
 	SWIFTPM_MODULECACHE_OVERRIDE="$(MODULE_CACHE)" CLANG_MODULE_CACHE_PATH="$(MODULE_CACHE)" swift build --disable-sandbox -c $(CONFIGURATION)
 	mkdir -p "$(CONTENTS_DIR)/MacOS" "$(CONTENTS_DIR)/Resources"
 	cp "$(BUILD_DIR)/$(APP_NAME)" "$(CONTENTS_DIR)/MacOS/$(APP_NAME)"
+	xcrun actool "$(ASSET_CATALOG)" --compile "$(CONTENTS_DIR)/Resources" --platform macosx --minimum-deployment-target 14.0 --app-icon AppIcon --output-partial-info-plist "$(ASSET_INFO)"
 	cp Resources/Info.plist "$(CONTENTS_DIR)/Info.plist"
 	@identity="$$(SIGN_IDENTITY="$(SIGN_IDENTITY)" SIGNING_CONFIG_FILE="$(SIGNING_CONFIG)" "$(SIGNING_RESOLVER)")"; \
 		codesign --force --deep --timestamp=none --sign "$$identity" --entitlements Resources/Voform.entitlements "$(APP_DIR)"

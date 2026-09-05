@@ -94,6 +94,48 @@ final class ShortcutGestureTests: XCTestCase {
         XCTAssertNil(gesture.handle(.up, keyCode: 49, modifiers: [], time: 1.4).action)
     }
 
+    func testHoldingReturnFinishesOnlyWhileRecording() {
+        var gesture = ShortcutGesture(shortcut: .optionSpace, mode: .toggle)
+        let idlePress = gesture.handle(.down, keyCode: 36, modifiers: [], time: 0)
+        XCTAssertNil(idlePress.action)
+        XCTAssertFalse(idlePress.consume)
+
+        let press = gesture.handle(.down, keyCode: 36, modifiers: [], time: 1, canCancel: true)
+        XCTAssertNil(press.action)
+        XCTAssertTrue(press.consume)
+        XCTAssertEqual(press.enterHoldEvent, .began)
+        let held = gesture.handle(.down, keyCode: 36, modifiers: [], isRepeat: true, time: 1.5, canCancel: true)
+        XCTAssertNil(held.action)
+        XCTAssertNil(held.enterHoldEvent)
+        XCTAssertTrue(held.consume)
+        let repeated = gesture.handle(.down, keyCode: 36, modifiers: [], isRepeat: true, time: 1.6, canCancel: true)
+        XCTAssertNil(repeated.action)
+        XCTAssertTrue(repeated.consume)
+        let release = gesture.handle(.up, keyCode: 36, modifiers: [], time: 1.7)
+        XCTAssertTrue(release.consume)
+        XCTAssertEqual(release.enterHoldEvent, .ended)
+    }
+
+    func testTappingEnterDoesNotFinishAndKeypadEnterAlsoWorks() {
+        var gesture = ShortcutGesture(shortcut: .optionSpace, mode: .toggle)
+        XCTAssertNil(gesture.handle(.down, keyCode: 36, modifiers: [], time: 0, canCancel: true).action)
+        let release = gesture.handle(.up, keyCode: 36, modifiers: [], time: 0.1, canCancel: true)
+        XCTAssertTrue(release.consume)
+        XCTAssertEqual(release.enterHoldEvent, .ended)
+        let keypadEnter = gesture.handle(.down, keyCode: 76, modifiers: [], time: 1, canCancel: true)
+        XCTAssertNil(keypadEnter.action)
+        XCTAssertEqual(keypadEnter.enterHoldEvent, .began)
+    }
+
+    func testModifiedReturnCanStillBeUsedAsConfiguredShortcut() {
+        let shortcut = HoldShortcut(keyCode: 36, modifiers: .option, keyTitle: "Return")
+        var gesture = ShortcutGesture(shortcut: shortcut, mode: .toggle)
+        XCTAssertEqual(
+            gesture.handle(.down, keyCode: 36, modifiers: .option, time: 0, canCancel: true).action,
+            .toggle
+        )
+    }
+
     func testFnHoldCombinationCancelsWithoutSubmitting() {
         var gesture = ShortcutGesture(shortcut: .function, mode: .hold)
         XCTAssertEqual(gesture.handle(.flagsChanged, keyCode: 63, modifiers: .function, time: 0).action, .begin)

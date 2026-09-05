@@ -117,18 +117,6 @@ enum RecognitionLanguage: String, CaseIterable {
     }
 }
 
-struct LLMConfiguration {
-    var baseURL: String
-    var apiKey: String
-    var model: String
-
-    var isConfigured: Bool {
-        !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-}
-
 final class Preferences {
     static let shared = Preferences()
 
@@ -140,10 +128,6 @@ final class Preferences {
         static let shortcutKeyTitle = "holdShortcutKeyTitle"
         static let shortcutIsModifierOnly = "holdShortcutIsModifierOnly"
         static let shortcutDefaultVersion = "holdShortcutDefaultVersion"
-        static let llmEnabled = "llmRefinementEnabled"
-        static let apiBaseURL = "llmAPIBaseURL"
-        static let apiKey = "llmAPIKey"
-        static let model = "llmModel"
     }
 
     private let defaults = UserDefaults.standard
@@ -155,11 +139,7 @@ final class Preferences {
             Key.shortcutKeyCode: Int(HoldShortcut.defaultShortcut.keyCode),
             Key.shortcutModifiers: HoldShortcut.defaultShortcut.modifiers.rawValue,
             Key.shortcutKeyTitle: HoldShortcut.defaultShortcut.keyTitle,
-            Key.shortcutIsModifierOnly: HoldShortcut.defaultShortcut.isModifierOnly,
-            Key.llmEnabled: false,
-            Key.apiBaseURL: "https://api.openai.com/v1",
-            Key.apiKey: "",
-            Key.model: "gpt-4.1-mini"
+            Key.shortcutIsModifierOnly: HoldShortcut.defaultShortcut.isModifierOnly
         ])
 
         // Move the old Fn default to Option-Space, preserving other custom bindings.
@@ -196,24 +176,4 @@ final class Preferences {
         }
     }
 
-    var llmEnabled: Bool {
-        get { defaults.bool(forKey: Key.llmEnabled) }
-        set { defaults.set(newValue, forKey: Key.llmEnabled) }
-    }
-
-    var llmConfiguration: LLMConfiguration {
-        get {
-            LLMConfiguration(
-                baseURL: defaults.string(forKey: Key.apiBaseURL) ?? "",
-                apiKey: defaults.string(forKey: Key.apiKey) ?? "",
-                model: defaults.string(forKey: Key.model) ?? ""
-            )
-        }
-        set {
-            defaults.set(newValue.baseURL, forKey: Key.apiBaseURL)
-            // Deliberately store an empty string so the API key can be fully cleared.
-            defaults.set(newValue.apiKey, forKey: Key.apiKey)
-            defaults.set(newValue.model, forKey: Key.model)
-        }
-    }
 }
