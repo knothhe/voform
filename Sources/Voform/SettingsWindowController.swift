@@ -48,7 +48,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
         var detail: String {
             switch self {
-            case .microphone: return "Captures audio while you hold the shortcut."
+            case .microphone: return "Captures audio during dictation."
             case .speechRecognition: return "Turns speech into text on your Mac."
             case .accessibility: return "Inserts the transcript into the active app."
             case .inputMonitoring: return "Detects the dictation shortcut system-wide."
@@ -74,6 +74,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private var selectedPane = Pane.general
 
     private let languageButton = NSPopUpButton()
+    private let recordingModeButton = NSPopUpButton()
+    private let useFnButton = NSButton(title: "Use Fn", target: nil, action: nil)
     private let currentShortcutLabel = NSTextField()
     private let changeShortcutButton = NSButton(title: "Record…", target: nil, action: nil)
     private let resetShortcutButton = NSButton(title: "Use Default", target: nil, action: nil)
@@ -98,7 +100,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     init(refiner: LLMRefiner) {
         self.refiner = refiner
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 540),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -206,8 +208,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         shortcutStatusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         shortcutStatusLabel.textColor = .secondaryLabelColor
         shortcutStatusLabel.lineBreakMode = .byTruncatingTail
+        shortcutStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let shortcutFooter = NSStackView(views: [shortcutStatusLabel, flexibleSpace(), resetShortcutButton])
+        useFnButton.target = self
+        useFnButton.action = #selector(useFnShortcut)
+        useFnButton.bezelStyle = .inline
+        useFnButton.isBordered = false
+        let shortcutFooter = NSStackView(views: [shortcutStatusLabel, flexibleSpace(), useFnButton, resetShortcutButton])
         shortcutFooter.orientation = .horizontal
         shortcutFooter.alignment = .centerY
         shortcutFooter.spacing = 8
@@ -215,7 +222,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         let shortcutCard = makeCard([
             settingRow(
                 title: "Dictation shortcut",
-                detail: "Hold to record, then release to insert the transcript.",
+                detail: "Choose a key combination or use Fn.",
                 control: shortcutControls,
                 height: 68
             ),
@@ -232,10 +239,25 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             )
         ])
 
+        for mode in RecordingMode.allCases {
+            recordingModeButton.addItem(withTitle: mode.title)
+            recordingModeButton.lastItem?.representedObject = mode.rawValue
+        }
+        recordingModeButton.target = self
+        recordingModeButton.action = #selector(recordingModeChanged)
+        let modeCard = makeCard([
+            settingRow(
+                title: "Recording mode",
+                detail: "Toggle: press again to finish. Hold: release to finish.",
+                control: recordingModeButton,
+                height: 68
+            )
+        ])
+
         return makePane(
             title: "General",
             subtitle: "Choose how Voform listens and starts dictation.",
-            cards: [languageCard, shortcutCard]
+            cards: [languageCard, shortcutCard, modeCard]
         )
     }
 
@@ -492,7 +514,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         changeShortcutButton.action = #selector(beginShortcutRecording)
         resetShortcutButton.isEnabled = true
         resetShortcutButton.isHidden = pendingShortcut == .defaultShortcut
-        shortcutStatusLabel.stringValue = "Fn / Globe is recommended; ⌥ Space works well with external keyboards."
+        recordingModeButton.selectItem(at: RecordingMode.allCases.firstIndex(of: Preferences.shared.recordingMode) ?? 0)
+        shortcutStatusLabel.stringValue = pendingShortcut.isModifierOnly
+            ? "Set the macOS Globe-key action to Do Nothing."
+            : "⌥ Space recommended. Esc cancels a recording."
+        shortcutStatusLabel.toolTip = pendingShortcut.isModifierOnly
+            ? "In System Settings → Keyboard, set Press Globe key to to Do Nothing. In toggle mode, tap Fn alone within 0.5 seconds; Fn combinations are ignored. In hold mode, another key cancels the recording."
+            : nil
         shortcutStatusLabel.textColor = .secondaryLabelColor
     }
 
@@ -518,6 +546,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
               let language = RecognitionLanguage(rawValue: rawValue) else { return }
         Preferences.shared.language = language
         onSave?()
+    }
+
+    @objc private func recordingModeChanged() {
+        endShortcutRecording()
+        guard let value = recordingModeButton.selectedItem?.representedObject as? String,
+              let mode = RecordingMode(rawValue: value) else { return }
+        Preferences.shared.recordingMode = mode
+        updateGeneralControls()
+        onSave?()
+    }
+
+    @objc private func useFnShortcut() {
+        endShortcutRecording()
+        pendingShortcut = .function
+        commitShortcut()
     }
 
     @objc private func refinementToggled() {
@@ -551,7 +594,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
                 return nil
             }
             guard !event.isARepeat else { return nil }
-            pendingShortcut = HoldShortcut(event: event)
+            let shortcut = HoldShortcut(event: event)
+            guard !shortcut.modifiers.isEmpty else {
+                shortcutStatusLabel.stringValue = "Include a modifier, e.g. ⌥ Space, or choose Use Fn."
+                return nil
+            }
+            pendingShortcut = shortcut
             endShortcutRecording()
             commitShortcut()
             return nil
@@ -574,7 +622,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         Preferences.shared.holdShortcut = pendingShortcut
         updateGeneralControls()
         shortcutStatusLabel.textColor = .systemGreen
-        shortcutStatusLabel.stringValue = "Shortcut updated — it applies immediately."
+        if !pendingShortcut.isModifierOnly {
+            shortcutStatusLabel.stringValue = "Shortcut updated — it applies immediately."
+        }
         onSave?()
     }
 

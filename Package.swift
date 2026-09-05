@@ -18,7 +18,8 @@ let package = Package(
                 .linkedFramework("Speech"),
                 .linkedFramework("Carbon")
             ]
-        )
+        ),
+        .testTarget(name: "VoformTests", dependencies: ["Voform"])
     ],
     swiftLanguageModes: [.v5]
 )

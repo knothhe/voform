@@ -87,7 +87,11 @@ final class WaveformView: NSView {
 }
 
 @MainActor
-final class RecordingPanelController {
+final class RecordingPanelController: NSObject {
+    var onFinish: (() -> Void)?
+    var onCancel: (() -> Void)?
+    private let finishButton = NSButton(title: "Finish", target: nil, action: nil)
+    private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
     private let panel: NSPanel
     private let visualEffectView: CapsuleVisualEffectView
     private let waveformView = WaveformView(frame: NSRect(x: 18, y: 12, width: 44, height: 32))
@@ -101,7 +105,7 @@ final class RecordingPanelController {
     private let rightPadding: CGFloat = 20
     private var visibilityGeneration = 0
 
-    init() {
+    override init() {
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 254, height: 56),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -117,6 +121,20 @@ final class RecordingPanelController {
         panel.isMovable = false
 
         visualEffectView = CapsuleVisualEffectView(frame: panel.contentView?.bounds ?? .zero)
+        super.init()
+        for button in [finishButton, cancelButton] {
+            button.bezelStyle = .rounded
+            button.controlSize = .small
+            button.target = self
+            button.autoresizingMask = [.minXMargin]
+            visualEffectView.addSubview(button)
+        }
+        finishButton.action = #selector(finishClicked)
+        cancelButton.action = #selector(cancelClicked)
+        finishButton.toolTip = "Finish recording and insert text"
+        cancelButton.toolTip = "Cancel recording (Esc)"
+        finishButton.frame = NSRect(x: 104, y: 16, width: 62, height: 24)
+        cancelButton.frame = NSRect(x: 170, y: 16, width: 66, height: 24)
         visualEffectView.autoresizingMask = [.width, .height]
         visualEffectView.material = .hudWindow
         visualEffectView.blendingMode = .behindWindow
@@ -168,7 +186,7 @@ final class RecordingPanelController {
         textLabel.stringValue = text.isEmpty ? "Listening…" : text
         let measured = ceil((textLabel.stringValue as NSString).size(withAttributes: [.font: textLabel.font!]).width + 6)
         let textWidth = max(minimumTextWidth, min(maximumTextWidth, measured))
-        let panelWidth = leftPadding + waveformWidth + spacing + textWidth + rightPadding
+        let panelWidth = leftPadding + waveformWidth + spacing + textWidth + rightPadding + 144
         let labelFrame = NSRect(x: leftPadding + waveformWidth + spacing, y: 17, width: textWidth, height: 22)
 
         guard panel.isVisible else {
@@ -191,6 +209,14 @@ final class RecordingPanelController {
                 panel?.invalidateShadow()
             }
         })
+    }
+
+    @objc private func finishClicked() { onFinish?() }
+    @objc private func cancelClicked() { onCancel?() }
+
+    func setRecording(_ recording: Bool) {
+        finishButton.isEnabled = recording
+        cancelButton.isEnabled = recording
     }
 
     func setAudioLevel(_ level: Double) {

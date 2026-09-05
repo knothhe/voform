@@ -52,7 +52,7 @@ struct HoldShortcut: Equatable {
 
     static let function = HoldShortcut(keyCode: 63, modifiers: .function, keyTitle: "Fn / Globe", isModifierOnly: true)
     static let optionSpace = HoldShortcut(keyCode: 49, modifiers: .option, keyTitle: "Space")
-    static let defaultShortcut = function
+    static let defaultShortcut = optionSpace
 
     var displayTitle: String {
         if isModifierOnly { return keyTitle }
@@ -87,6 +87,15 @@ struct HoldShortcut: Equatable {
         if let title = specialKeys[event.keyCode] { return title }
         let characters = event.charactersIgnoringModifiers?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return characters.isEmpty ? "Key \(event.keyCode)" : characters.uppercased()
+    }
+}
+
+enum RecordingMode: String, CaseIterable {
+    case toggle
+    case hold
+
+    var title: String {
+        self == .toggle ? "Press to toggle" : "Hold to talk"
     }
 }
 
@@ -125,6 +134,7 @@ final class Preferences {
 
     private enum Key {
         static let language = "recognitionLanguage"
+        static let recordingMode = "recordingMode"
         static let shortcutKeyCode = "holdShortcutKeyCode"
         static let shortcutModifiers = "holdShortcutModifiers"
         static let shortcutKeyTitle = "holdShortcutKeyTitle"
@@ -141,6 +151,7 @@ final class Preferences {
     private init() {
         defaults.register(defaults: [
             Key.language: RecognitionLanguage.simplifiedChinese.rawValue,
+            Key.recordingMode: RecordingMode.toggle.rawValue,
             Key.shortcutKeyCode: Int(HoldShortcut.defaultShortcut.keyCode),
             Key.shortcutModifiers: HoldShortcut.defaultShortcut.modifiers.rawValue,
             Key.shortcutKeyTitle: HoldShortcut.defaultShortcut.keyTitle,
@@ -151,12 +162,16 @@ final class Preferences {
             Key.model: "gpt-4.1-mini"
         ])
 
-        // Version 2 changes the application default back to Fn / Globe. Apply it
-        // once to existing installations that received the temporary ⌥ Space default.
-        if defaults.integer(forKey: Key.shortcutDefaultVersion) < 2 {
-            holdShortcut = .defaultShortcut
-            defaults.set(2, forKey: Key.shortcutDefaultVersion)
+        // Move the old Fn default to Option-Space, preserving other custom bindings.
+        if defaults.integer(forKey: Key.shortcutDefaultVersion) < 3 {
+            if holdShortcut == .function { holdShortcut = .defaultShortcut }
+            defaults.set(3, forKey: Key.shortcutDefaultVersion)
         }
+    }
+
+    var recordingMode: RecordingMode {
+        get { RecordingMode(rawValue: defaults.string(forKey: Key.recordingMode) ?? "") ?? .toggle }
+        set { defaults.set(newValue.rawValue, forKey: Key.recordingMode) }
     }
 
     var language: RecognitionLanguage {

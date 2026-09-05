@@ -4,7 +4,7 @@ import ApplicationServices
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let preferences = Preferences.shared
-    private lazy var shortcutMonitor = ShortcutMonitor(shortcut: preferences.holdShortcut)
+    private lazy var shortcutMonitor = ShortcutMonitor(shortcut: preferences.holdShortcut, mode: preferences.recordingMode)
     private let transcriber = SpeechTranscriber()
     private let recordingPanel = RecordingPanelController()
     private let textInjector = TextInjector()
@@ -22,7 +22,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         buildMenuBar()
         requestSystemPermissions()
 
-        shortcutMonitor.onHeldChanged = { [weak self] held in self?.handleShortcut(held: held) }
+        shortcutMonitor.onAction = { [weak self] action in self?.handleShortcut(action) }
+        shortcutMonitor.onInterrupted = { [weak self] in self?.cancelRecording() }
+        recordingPanel.onFinish = { [weak self] in self?.finishRecording() }
+        recordingPanel.onCancel = { [weak self] in self?.cancelRecording() }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(cancelRecording), name: NSWorkspace.willSleepNotification, object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(cancelRecording), name: NSWorkspace.sessionDidResignActiveNotification, object: nil
+        )
         if !shortcutMonitor.start() {
             showPermissionAlert(message: "Voform could not monitor the dictation shortcut. Enable Input Monitoring and Accessibility for Voform in System Settings, then relaunch it.")
         }
@@ -85,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         settingsController.onSave = { [weak self] in
             guard let self else { return }
-            shortcutMonitor.setShortcut(preferences.holdShortcut)
+            shortcutMonitor.configure(shortcut: preferences.holdShortcut, mode: preferences.recordingMode)
             updateMenuStates()
         }
         settingsController.onShortcutRecordingChanged = { [weak self] isRecordingShortcut in
@@ -125,12 +134,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsController.show(pane: .privacy)
     }
 
-    private func handleShortcut(held: Bool) {
-        if held { beginRecording() } else { finishRecording() }
+    private func handleShortcut(_ action: ShortcutGesture.Action) {
+        switch action {
+        case .begin: beginRecording()
+        case .finish: finishRecording()
+        case .toggle:
+            if isRecording { finishRecording() } else { beginRecording() }
+        case .cancel: cancelRecording()
+        }
+    }
+
+    @objc private func cancelRecording() {
+        guard isRecording else { return }
+        isRecording = false
+        shortcutMonitor.canCancel = false
+        transcriber.cancel()
+        recordingPanel.hide()
     }
 
     private var shortcutHint: String {
-        "Hold \(preferences.holdShortcut.displayTitle) to dictate"
+        let key = preferences.holdShortcut.displayTitle
+        if preferences.recordingMode == .hold { return "Hold \(key) to dictate; release to finish" }
+        let verb = preferences.holdShortcut.isModifierOnly ? "Tap" : "Press"
+        return "\(verb) \(key) to start / finish dictation"
     }
 
     private var shortcutToolTip: String {
@@ -142,11 +168,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             try transcriber.start(
                 language: preferences.language,
-                onPartial: { [weak self] text in self?.recordingPanel.updateText(text) },
-                onAudioLevel: { [weak self] level in self?.recordingPanel.setAudioLevel(level) },
-                onError: { [weak self] _ in self?.recordingPanel.updateText("Recognition unavailable — release to retry") }
+                onPartial: { [weak self] text in
+                    guard let self, isRecording else { return }
+                    recordingPanel.updateText(text)
+                },
+                onAudioLevel: { [weak self] level in
+                    guard let self, isRecording else { return }
+                    recordingPanel.setAudioLevel(level)
+                },
+                onError: { [weak self] _ in
+                    guard let self, isRecording else { return }
+                    recordingPanel.updateText("Recognition unavailable — finish or cancel")
+                }
             )
             isRecording = true
+            shortcutMonitor.canCancel = true
+            recordingPanel.setRecording(true)
             recordingPanel.show()
         } catch {
             showPermissionAlert(message: error.localizedDescription)
@@ -156,7 +193,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func finishRecording() {
         guard isRecording else { return }
         isRecording = false
+        shortcutMonitor.canCancel = false
         isProcessing = true
+        recordingPanel.setRecording(false)
+        recordingPanel.updateText("Transcribing…")
         recordingPanel.setAudioLevel(0)
 
         Task {
